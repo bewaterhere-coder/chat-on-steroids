@@ -86,6 +86,24 @@ test('independent authority revocation blocks even committed active auth', async
   try { f.deny(); await assert.rejects(f.owner.verifyCanonical(f.args), /IndependentAuthorityDenied/); }
   finally { f.close(); }
 });
+test('revocation during a Core child denies post-effect readback before receipt', async () => {
+  const f = fixture();
+  try {
+    await f.owner.verifyCanonical(f.args);
+    f.next();
+    f.deny();
+    await assert.rejects(f.owner.rereadCanonical(f.args), /PostOperationIndependentAuthorityDenied/);
+  } finally { f.close(); }
+});
+test('post-effect plan drift denies readback even when receipt would be present', async () => {
+  const f = fixture();
+  try {
+    await f.owner.verifyCanonical(f.args);
+    f.next();
+    f.data.plan.state = 'Draft';
+    await assert.rejects(f.owner.rereadCanonical(f.args), /CanonicalTaskApprovalMismatch/);
+  } finally { f.close(); }
+});
 test('approved plan drift fails closed', async () => {
   const f = fixture();
   try { f.data.plan.state = 'Draft';

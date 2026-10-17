@@ -54,7 +54,7 @@ export function createDevforgeCanonicalOwner({ workspace, sources, approvedOpera
     }
     return { sha, data: result };
   };
-  const check = (x, snap) => {
+  const check = (x, snap, requireOriginalHead = true) => {
     const { task, plan, slice_set: slices, authorization: auth,
       execution_binding: binding, transport } = snap.data;
     const scope = dict(approvedOperations[x.capability]);
@@ -79,7 +79,7 @@ export function createDevforgeCanonicalOwner({ workspace, sources, approvedOpera
         authLink.transport_ref !== transport.ref || transport.readback_verified !== true ||
         !Array.isArray(allowed) || !allowed.includes(expectedAction) ||
         binding.cos_core !== true || binding.provider !== x.expectedProvider ||
-        binding.host_id !== x.expectedHost || snap.sha !== x.gitHead ||
+        binding.host_id !== x.expectedHost || (requireOriginalHead && snap.sha !== x.gitHead) ||
         scope.command !== x.args.cmd || scope.workdir !== x.args.workdir ||
         selection.provider !== x.expectedProvider || selection.hostId !== x.expectedHost ||
         realpathSync(scope.workdir) !== root) blocked('CanonicalTaskApprovalMismatch');
@@ -114,14 +114,21 @@ export function createDevforgeCanonicalOwner({ workspace, sources, approvedOpera
     },
     async rereadCanonical(x) {
       const snap = snapshot();
-      // Recheck original task binding at current HEAD (which may advance).
-      const scope = dict(approvedOperations[x.capability]);
-      if (!scope.allowedPaths || dict(snap.data.task).task_id !== x.taskId ||
-          dict(snap.data.authorization).state !== 'active') blocked('PostOperationOwnerDrift');
+      // Recheck *all* bindings against the new HEAD, not only the Task ID and
+      // the committed authorization flag. A side effect may have changed the
+      // plan, transport, provider, host, or writer ownership.
+      const { scope } = check(x, snap, false);
       const changed = gitExec(['diff', '--name-only', x.gitHead, snap.sha])
         .split(/\r?\n/).filter(Boolean);
       if (changed.some(p => !scope.allowedPaths.includes(p)) ||
           gitExec(['status', '--porcelain'])) blocked('PostOperationOutsideScopeOrDirty');
+      // Approval is owned independently of committed Git JSON. It may be
+      // revoked while the guarded Core child runs; never accept a receipt
+      // without checking the original authority again after the effect.
+      const independence = await verifyIndependentAuthority({ ...x,
+        snapshot: snap.data, head: snap.sha,
+        allowedPaths: scope.allowedPaths, approvalRef: scope.approvalRef });
+      if (independence !== true) blocked('PostOperationIndependentAuthorityDenied');
       const receipt = await verifyOwningReceipt({ ...x, head: snap.sha,
         snapshot: snap.data, changedPaths: changed });
       if (!receipt || receipt.verified !== true || !text(receipt.ref))
