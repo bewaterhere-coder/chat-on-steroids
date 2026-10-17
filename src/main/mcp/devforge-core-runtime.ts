@@ -8,6 +8,7 @@ import { currentCall, type CallContext } from './call-context.js';
 import { createRegistrar, type ToolContext, type ToolResult } from './kernel.js';
 import { registerCoreTools } from './tools-core.js';
 import { withManagedSkills } from '../skill-access.js';
+import { createTrustedDevforgeNativeRuntime } from './devforge-native-runtime.mjs';
 
 export type TrustedDevforgeCoreInvoker = (
   name: string, args: unknown, parent: CallContext
@@ -33,4 +34,23 @@ export function createTrustedDevforgeCoreInvoker(liveContext: () => ToolContext)
     registerCoreTools(reg);
     return reg.invokeNested(name, args, parent);
   };
+}
+
+/** A main-process-only activation point; neither owner callback can be supplied
+ * from an MCP argument. A missing original owner is an activation error. */
+export function bindTrustedDevforgeNativeRuntime(
+  liveContext: () => ToolContext,
+  owner: {
+    workspace: string;
+    sources: Record<string, string>;
+    approvedOperations: Record<string, unknown>;
+    verifyIndependentAuthority: (x: unknown) => Promise<boolean>;
+    verifyOwningReceipt: (x: unknown) => Promise<unknown>;
+  }
+) {
+  return createTrustedDevforgeNativeRuntime({
+    ...owner,
+    currentCall,
+    invokeCoreTool: createTrustedDevforgeCoreInvoker(liveContext)
+  });
 }
