@@ -24,6 +24,24 @@ import { desktopAutomationSupported } from './platform.js';
 import { publishPluginSurface, unpublishPluginSurface, pluginRefreshPublications } from './plugin-refresh.js';
 import { pluginManager } from './plugins/manager.js';
 
+/** A trusted, already-authorized DevForge owner can only be registered from
+ * main-process code before the endpoint starts. Nothing exposed through MCP,
+ * renderer settings or environment variables can manufacture this authority.
+ * In its absence the existing COS connector remains unchanged.
+ */
+type TrustedDevforgeOwner = NonNullable<Parameters<typeof startMcpServer>[2]>;
+let trustedDevforgeOwner: TrustedDevforgeOwner | undefined;
+export function installTrustedDevforgeOwner(owner: TrustedDevforgeOwner): void {
+  if (trustedDevforgeOwner || endpoint || drainingEndpoint || pendingDisconnect) {
+    throw new Error('DevforgeOwnerAlreadyInstalledOrConnectionActive');
+  }
+  if (!owner || typeof owner.verifyIndependentAuthority !== 'function' ||
+      typeof owner.verifyOwningReceipt !== 'function') {
+    throw new Error('DevforgeIndependentOwnerRequired');
+  }
+  trustedDevforgeOwner = owner;
+}
+
 let endpoint: McpEndpoint | null = null;
 /** Retain custody while draining so final shutdown can bound that same stop. */
 let drainingEndpoint: McpEndpoint | null = null;
@@ -416,7 +434,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
         readOnly: live.readOnly,
         privacyScreenshots: live.ui.privacyScreenshots
       };
-    }, kept);
+    }, kept, trustedDevforgeOwner);
     if (keepUrls && !(await rememberSurfaceTokens(startedEndpoint.urls))) {
       logWarn('connector URLs: secure storage is unavailable, so they change at the next start');
     }
