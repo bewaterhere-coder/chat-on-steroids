@@ -26,12 +26,14 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
-import { buildServer, resetToolClock, type ToolContext } from './tools.js';
+import { buildServer, resetToolClock, bindTrustedDevforgeNativeRuntime, type ToolContext } from './tools.js';
 import { SURFACE_IDS, configuredConnectorName, type SurfaceId } from './surfaces.js';
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 export interface McpEndpoint {
+  /** Main-process-only; absent unless a separately trusted DevForge owner was supplied. */
+  devforgeNative?: { executeChild: (request: unknown) => Promise<unknown> };
   /** Reuses the endpoint's actual exposure projection; no tool handlers are executed. */
   publication?: (surface: SurfaceId, observe: Parameters<typeof buildServer>[2]) => void;
   port: number;
@@ -260,7 +262,11 @@ export function forgetExposedSurface(): void {
   surfaceExposure.clear();
 }
 
-export async function startMcpServer(getContext: () => ToolContext, kept: Partial<Record<SurfaceId, string>> = {}): Promise<McpEndpoint> {
+export async function startMcpServer(
+  getContext: () => ToolContext,
+  kept: Partial<Record<SurfaceId, string>> = {},
+  trustedDevforgeOwner?: Parameters<typeof bindTrustedDevforgeNativeRuntime>[1]
+): Promise<McpEndpoint> {
   // A per-session token in the path is what authorises callers. It is regenerated on
   // every app start, so a URL that leaks stops working when the app restarts, unless the
   // user opted into keeping it (`mcp.persistentUrls`, see persistent-paths.ts): then the
@@ -316,6 +322,12 @@ export async function startMcpServer(getContext: () => ToolContext, kept: Partia
       exposedFind: exposed.find
     };
   };
+
+  // Validate the trusted owner before opening any listener. A missing owner
+  // retains the legacy Core path; an invalid supplied owner fails closed.
+  const devforgeNative = trustedDevforgeOwner
+    ? bindTrustedDevforgeNativeRuntime(() => stableContext('core'), trustedDevforgeOwner)
+    : undefined;
 
   // One handler per surface, and the routing below is the only thing that decides which
   // one sees a request. This is what makes the discovery boundary real rather than
@@ -501,6 +513,9 @@ export async function startMcpServer(getContext: () => ToolContext, kept: Partia
   const urls = Object.fromEntries(routes.map((surface) => [surface.id, surface.url])) as Record<SurfaceId, string>;
 
   return {
+    // Ownership comes from trusted main-process initialization, never from an
+    // inbound MCP request, environment variable or a committed JSON assertion.
+    ...(devforgeNative ? { devforgeNative } : {}),
     port: address.port,
     url: urls.core,
     urls,
