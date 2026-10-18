@@ -27,6 +27,10 @@ import { APP_VERSION } from './../version.js';
 import { toVirtualPath } from '../sandbox.js';
 import { logWarn } from '../logger.js';
 import { withManagedSkills } from '../skill-access.js';
+import { createTrustedDevforgeCoreInvoker, bindTrustedDevforgeNativeRuntime } from './devforge-core-runtime.js';
+
+/** Internal COS/DevForge integration point. Never added to the MCP tool list. */
+export { createTrustedDevforgeCoreInvoker, bindTrustedDevforgeNativeRuntime };
 
 /**
  * The resource and prompt catalogs, which no surface has, answered as empty lists (#1557).
