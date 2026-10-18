@@ -23,6 +23,7 @@ import { tunnelRouteSettlingUntil } from './tunnel/route-settle.js';
 import { desktopAutomationSupported } from './platform.js';
 import { publishPluginSurface, unpublishPluginSurface, pluginRefreshPublications } from './plugin-refresh.js';
 import { pluginManager } from './plugins/manager.js';
+import { createDevforgeSignedOwner } from './mcp/devforge-signed-owner.mjs';
 
 /** A trusted, already-authorized DevForge owner can only be registered from
  * main-process code before the endpoint starts. Nothing exposed through MCP,
@@ -40,6 +41,20 @@ export function installTrustedDevforgeOwner(owner: TrustedDevforgeOwner): void {
     throw new Error('DevforgeIndependentOwnerRequired');
   }
   trustedDevforgeOwner = owner;
+}
+
+/** The preferred installation path when the independent DevForge authority
+ * provides signed per-operation decisions. The signer and the private key
+ * MUST remain outside COS. This does not install or simulate a signer. */
+export function installSignedDevforgeOwner(
+  config: Omit<TrustedDevforgeOwner, 'verifyIndependentAuthority' | 'verifyOwningReceipt'> & {
+    publicKeyPem: string;
+    requestDecision: Parameters<typeof createDevforgeSignedOwner>[0]['requestDecision'];
+  }
+): void {
+  const { publicKeyPem, requestDecision, ...canonicalOwner } = config;
+  const verifier = createDevforgeSignedOwner({ publicKeyPem, requestDecision });
+  installTrustedDevforgeOwner({ ...canonicalOwner, ...verifier });
 }
 
 let endpoint: McpEndpoint | null = null;
